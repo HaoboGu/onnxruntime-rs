@@ -11,6 +11,7 @@ use std::os::windows::ffi::OsStrExt;
 use std::env;
 
 use ndarray::Array;
+use sys::OrtSession;
 use tracing::{debug, error};
 
 use onnxruntime_sys as sys;
@@ -371,6 +372,10 @@ impl<'a> Drop for Session<'a> {
 }
 
 impl<'a> Session<'a> {
+    pub fn get_session_ptr(&self) -> *mut OrtSession {
+        self.session_ptr
+    }
+
     /// Run the input data through the ONNX graph, performing inference.
     ///
     /// Note that ONNX models can have multiple inputs; a `Vec<_>` is thus

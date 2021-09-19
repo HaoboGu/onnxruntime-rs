@@ -197,7 +197,7 @@ pub(crate) fn assert_null_pointer<T>(ptr: *const T, name: &str) -> Result<()> {
         .ok_or_else(|| OrtError::PointerShouldBeNull(name.to_owned()))
 }
 
-pub(crate) fn assert_not_null_pointer<T>(ptr: *const T, name: &str) -> Result<()> {
+pub fn assert_not_null_pointer<T>(ptr: *const T, name: &str) -> Result<()> {
     (!ptr.is_null())
         .then(|| ())
         .ok_or_else(|| OrtError::PointerShouldBeNull(name.to_owned()))
@@ -222,15 +222,13 @@ impl From<OrtStatusWrapper> for std::result::Result<(), OrtApiError> {
     }
 }
 
-pub(crate) fn status_to_result(
-    status: *const sys::OrtStatus,
-) -> std::result::Result<(), OrtApiError> {
+pub fn status_to_result(status: *const sys::OrtStatus) -> std::result::Result<(), OrtApiError> {
     let status_wrapper: OrtStatusWrapper = status.into();
     status_wrapper.into()
 }
 
 /// A wrapper around a function on OrtApi that maps the status code into [OrtApiError]
-pub(crate) unsafe fn call_ort<F>(mut f: F) -> std::result::Result<(), OrtApiError>
+pub unsafe fn call_ort<F>(mut f: F) -> std::result::Result<(), OrtApiError>
 where
     F: FnMut(sys::OrtApi) -> *const sys::OrtStatus,
 {

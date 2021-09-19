@@ -1,7 +1,14 @@
-use std::cmp::max;
+use std::{cmp::max, collections::HashMap, ffi::CString};
 
-use ndarray::{Array1, ArrayD};
-use onnxruntime::{environment::Environment, GraphOptimizationLevel};
+use ndarray::{Array, Array1, ArrayD};
+use onnxruntime::{
+    environment::Environment,
+    error::{assert_not_null_pointer, call_ort, status_to_result},
+    session::Session,
+    tensor::{self, OrtOwnedTensor, OrtTensor},
+    GraphOptimizationLevel,
+};
+use onnxruntime_sys as sys;
 use tokenizers::tokenizer::{Result, Tokenizer};
 use tracing::{info, Level};
 use tracing_subscriber::FmtSubscriber;
@@ -56,10 +63,82 @@ fn main() {
     // Output { name: "present_11", output_type: Float, dimensions: [Some(2), None, Some(12), None, Some(64)] }] }
     println!("{:#?}", session.inputs);
     info!("{:#?}", session.outputs);
-    get_example_input(vec![
-        "best hotel in bay area".to_string(),
-        "here is an example of gpt2 model".to_string(),
-    ]);
+    let (padded_input_ids, padded_attention_mask, padded_position_ids, empty_past) =
+        get_example_input(vec![
+            "best hotel in bay area".to_string(),
+            "here is an example of gpt2 model".to_string(),
+        ]);
+    create_ort_output_buffer(&session, 2, 0, 9, 12, 768, 12, 50257);
+
+    // where onnxruntime will write the iobind to
+    let mut iobinding_ptr: *mut sys::OrtIoBinding = std::ptr::null_mut();
+    let iobinding_ptr_ptr: *mut *mut sys::OrtIoBinding = &mut iobinding_ptr;
+
+    // Create io-binding
+    unsafe {
+        call_ort(|ort| ort.CreateIoBinding.unwrap()(session.get_session_ptr(), iobinding_ptr_ptr))
+    }
+    .unwrap();
+
+    // Bind input
+    unsafe {
+        // Bind input name to an ort Value ptr
+        call_ort(|ort| {
+            ort.BindInput.unwrap()(
+                iobinding_ptr,
+                CString::new("name").unwrap().into_raw() as *const i8,
+                padded_input_ids,
+            )
+        })
+    }
+    .unwrap();
+}
+
+fn create_ort_output_buffer(
+    session: &Session,
+    batch_size: usize,
+    past_sequence_size: usize,
+    sequence_size: usize,
+    num_attention_heads: usize,
+    hidden_layer_size: usize,
+    num_hidden_layer: usize,
+    vocab_size: usize,
+) {
+    // Get output_shapes first
+    let mut output_shapes: HashMap<String, Vec<usize>> = HashMap::new();
+    for output in &session.outputs {
+        let output_size = if output.name == "logits" {
+            vocab_size
+        } else {
+            hidden_layer_size
+        };
+        let last_state_shape = [batch_size, sequence_size, output_size];
+        let present_state_shape = [
+            2,
+            batch_size,
+            num_attention_heads,
+            past_sequence_size + sequence_size,
+            hidden_layer_size / num_attention_heads,
+        ];
+        output_shapes.insert(output.name.clone(), last_state_shape.to_vec());
+        for i in 0..num_hidden_layer {
+            let mut k = String::from("present_");
+            k.push_str(&i.to_string());
+            output_shapes.insert(k, present_state_shape.to_vec());
+        }
+    }
+
+    println!("shapes: {:?}", output_shapes);
+
+    // Get output buffers, use ndarray as the buffer backed
+    let mut output_buffer: HashMap<String, ArrayD<f32>> = HashMap::new();
+    for (name, shape) in output_shapes {
+        let data = ArrayD::<f32>::zeros(shape);
+        output_buffer.insert(name, data);
+    }
+    for b in output_buffer.values() {
+        println!("buffers shape: {:?}", b.shape());
+    }
 }
 
 fn get_tokenizer() -> Result<tokenizers::Tokenizer> {
@@ -141,7 +220,7 @@ fn get_example_input(
     // num_layer = model.config.n_layer
     let past_shape = vec![
         2,
-        1,  // batch_size,
+        2,  // batch_size,
         12, // num_attention_heads,
         0,
         768 / 12, // hidden_size / num_attention_heads,

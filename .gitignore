@@ -7,3 +7,5 @@ Cargo.lock
 **/synset.txt
 
 /.idea
+**/cache_models
+*.dll
