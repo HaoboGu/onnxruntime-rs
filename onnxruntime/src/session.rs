@@ -24,6 +24,7 @@ use crate::{
         OrtApiError, OrtError, Result,
     },
     g_ort,
+    iobinding::IoBinding,
     memory::MemoryInfo,
     tensor::{
         ort_owned_tensor::{OrtOwnedTensor, OrtOwnedTensorExtractor},
@@ -298,9 +299,9 @@ impl<'a> SessionBuilder<'a> {
 #[derive(Debug)]
 pub struct Session<'a> {
     env: &'a Environment,
-    session_ptr: *mut sys::OrtSession,
-    allocator_ptr: *mut sys::OrtAllocator,
-    memory_info: MemoryInfo,
+    pub session_ptr: *mut sys::OrtSession,
+    pub allocator_ptr: *mut sys::OrtAllocator,
+    pub(crate) memory_info: MemoryInfo,
     /// Information about the ONNX's inputs as stored in loaded file
     pub inputs: Vec<Input>,
     /// Information about the ONNX's outputs as stored in loaded file
@@ -375,6 +376,9 @@ impl<'a> Session<'a> {
     pub fn get_session_ptr(&self) -> *mut OrtSession {
         self.session_ptr
     }
+
+    /// Run the inference with iobinding
+    pub fn run_with_iobinding(iobinding: IoBinding) {}
 
     /// Run the input data through the ONNX graph, performing inference.
     ///

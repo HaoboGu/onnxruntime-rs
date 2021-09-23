@@ -144,6 +144,7 @@ macro_rules! extern_system_fn {
 pub mod download;
 pub mod environment;
 pub mod error;
+pub mod iobinding;
 mod memory;
 pub mod session;
 pub mod tensor;
