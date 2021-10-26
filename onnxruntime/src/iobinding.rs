@@ -31,12 +31,60 @@ impl IoBinding {
     }
 
     /// Bind input to iobinding
-    pub fn bind_input<T, D>(&self, session: &Session, name: &str, mut input: Array<T, D>)
+    pub fn bind_input<T, D>(&self, session: &Session, name: &str, input: Array<T, D>)
     where
         T: TypeToTensorElementDataType + Debug + Clone,
         D: ndarray::Dimension,
     {
         // First, create ort value from input
+        let tensor_ptr = self.create_ort_value(session, input);
+
+        // Bind input
+        unsafe {
+            // Bind input name to an ort Value ptr
+            call_ort(|ort| {
+                ort.BindInput.unwrap()(
+                    self.iobinding_ptr,
+                    CString::new(name).unwrap().into_raw() as *const i8,
+                    tensor_ptr,
+                )
+            })
+        }
+        .unwrap();
+    }
+
+    /// Bind output to iobinding
+    pub fn bind_output<T, D>(&self, session: &Session, name: &str, output: Array<T, D>)
+    where
+        T: TypeToTensorElementDataType + Debug + Clone,
+        D: ndarray::Dimension,
+    {
+        // First, create ort value from input
+        let tensor_ptr = self.create_ort_value(session, output);
+
+        // Bind output
+        unsafe {
+            // Bind output name to an ort Value ptr
+            call_ort(|ort| {
+                ort.BindOutput.unwrap()(
+                    self.iobinding_ptr,
+                    CString::new(name).unwrap().into_raw() as *const i8,
+                    tensor_ptr,
+                )
+            })
+        }
+        .unwrap();
+    }
+
+    fn create_ort_value<T, D>(
+        &self,
+        session: &Session,
+        mut input: Array<T, D>,
+    ) -> *mut sys::OrtValue
+    where
+        T: TypeToTensorElementDataType + Debug + Clone,
+        D: ndarray::Dimension,
+    {
         let data_ptr: *mut std::ffi::c_void = input.as_mut_ptr() as *mut std::ffi::c_void;
         let shape: Vec<i64> = input.shape().iter().map(|d: &usize| *d as i64).collect();
         let shape_ptr: *const i64 = shape.as_ptr();
@@ -58,19 +106,7 @@ impl IoBinding {
         }
         .map_err(OrtError::CreateTensorWithData)
         .unwrap();
-
-        // Bind input
-        unsafe {
-            // Bind input name to an ort Value ptr
-            call_ort(|ort| {
-                ort.BindInput.unwrap()(
-                    self.iobinding_ptr,
-                    CString::new(name).unwrap().into_raw() as *const i8,
-                    tensor_ptr,
-                )
-            })
-        }
-        .unwrap();
+        tensor_ptr
     }
 }
 
@@ -91,10 +127,13 @@ mod tests {
             .unwrap()
             .with_optimization_level(GraphOptimizationLevel::All)
             .unwrap()
-            .with_model_from_file("D:\\Projects\\onnxruntime-rs\\gpt2.onnx")
+            .with_model_from_file(
+                "/Users/haobogu/Projects/rust/onnxruntime-rs/onnxruntime/examples/gpt2.onnx",
+            )
             .unwrap();
         let array = arr0::<i32>(123);
         let iobinding = IoBinding::new(session.session_ptr).unwrap();
-        iobinding.bind_input(&session, "input_ids", array);
+        iobinding.bind_input(&session, "input_ids", array.clone());
+        iobinding.bind_output(&session, "output_ids", array);
     }
 }
