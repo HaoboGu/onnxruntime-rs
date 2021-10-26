@@ -378,7 +378,18 @@ impl<'a> Session<'a> {
     }
 
     /// Run the inference with iobinding
-    pub fn run_with_iobinding(iobinding: IoBinding) {}
+    pub fn run_with_iobinding<'s>(&'s mut self, iobinding: IoBinding) -> Result<()>{
+        let run_options_ptr: *const sys::OrtRunOptions = std::ptr::null();
+        let status = unsafe {
+            g_ort().RunWithBinding.unwrap()(
+                self.session_ptr,
+                run_options_ptr,
+                iobinding.iobinding_ptr,
+            )
+        };
+        status_to_result(status).map_err(OrtError::Run)?;
+        Ok(())    
+    }
 
     /// Run the input data through the ONNX graph, performing inference.
     ///

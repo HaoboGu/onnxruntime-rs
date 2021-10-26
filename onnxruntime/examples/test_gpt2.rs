@@ -1,6 +1,6 @@
 use std::{cmp::max, collections::HashMap, ffi::CString};
 
-use ndarray::{Array, Array1, ArrayD};
+use ndarray::{Array, Array1, Array2, ArrayD, IxDyn};
 use onnxruntime::{
     environment::Environment,
     error::{assert_not_null_pointer, call_ort, status_to_result},
@@ -78,6 +78,7 @@ fn main() {
 
     // Bind values
     for (i, _input) in padded_input_ids.iter().enumerate() {
+        println!("input ids: {:?}", padded_input_ids[i].clone());
         io_binding.bind_input(&session, "input_ids", padded_input_ids[i].clone());
         io_binding.bind_input(&session, "attention_mask", padded_attention_mask[i].clone());
         io_binding.bind_input(&session, "position_ids", padded_position_ids[i].clone());
@@ -96,6 +97,10 @@ fn main() {
     for (name, buf) in output_buffer {
         io_binding.bind_output(&session, &name, buf);
     }
+
+    session.run_with_iobinding(io_binding).unwrap();
+    // TODO: get output from iobinding buffer
+    // get_outputs_from_io_binding_buffer();
 }
 
 fn create_ort_output_buffer(
@@ -241,7 +246,17 @@ fn get_example_input(
         "{:?},\n {:?},\n {:?},\n {:?},",
         padded_input_ids, padded_attention_mask, padded_position_ids, empty_past
     );
+    let asdfasfd = ArrayD::<i64>::from_shape_vec(
+        IxDyn(&[padded_input_ids.len(), padded_input_ids[0].len()]),
+        padded_input_ids,
+    )
+    .unwrap();
     (
+        padded_input_ids,
+        padded_attention_mask,
+        padded_position_ids,
+        empty_past,
+    )(
         padded_input_ids,
         padded_attention_mask,
         padded_position_ids,

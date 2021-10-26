@@ -15,7 +15,7 @@ use sys::OrtSession;
 /// IoBinding is a wrapper for onnx io binding
 #[derive(Debug)]
 pub struct IoBinding {
-    iobinding_ptr: *mut sys::OrtIoBinding,
+    pub(crate) iobinding_ptr: *mut sys::OrtIoBinding,
 }
 
 impl IoBinding {
