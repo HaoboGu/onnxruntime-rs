@@ -4,6 +4,7 @@ use ndarray::{Array, Array1, ArrayD};
 use onnxruntime::{
     environment::Environment,
     error::{assert_not_null_pointer, call_ort, status_to_result},
+    iobinding,
     session::Session,
     tensor::{self, OrtOwnedTensor, OrtTensor},
     GraphOptimizationLevel,
@@ -28,7 +29,9 @@ fn main() {
         .unwrap()
         .with_optimization_level(GraphOptimizationLevel::All)
         .unwrap()
-        .with_model_from_file("gpt2.onnx")
+        .with_model_from_file(
+            "/Users/haobogu/Projects/rust/onnxruntime-rs/onnxruntime/examples/gpt2.onnx",
+        )
         .unwrap();
 
     // inputs:
@@ -68,30 +71,31 @@ fn main() {
             "best hotel in bay area".to_string(),
             "here is an example of gpt2 model".to_string(),
         ]);
-    create_ort_output_buffer(&session, 2, 0, 9, 12, 768, 12, 50257);
+    let output_buffer = create_ort_output_buffer(&session, 2, 0, 9, 12, 768, 12, 50257);
 
-    // where onnxruntime will write the iobind to
-    let mut iobinding_ptr: *mut sys::OrtIoBinding = std::ptr::null_mut();
-    let iobinding_ptr_ptr: *mut *mut sys::OrtIoBinding = &mut iobinding_ptr;
+    // Create io bindings
+    let io_binding = iobinding::IoBinding::new(session.session_ptr).unwrap();
 
-    // Create io-binding
-    unsafe {
-        call_ort(|ort| ort.CreateIoBinding.unwrap()(session.get_session_ptr(), iobinding_ptr_ptr))
+    // Bind values
+    for (i, _input) in padded_input_ids.iter().enumerate() {
+        io_binding.bind_input(&session, "input_ids", padded_input_ids[i].clone());
+        io_binding.bind_input(&session, "attention_mask", padded_attention_mask[i].clone());
+        io_binding.bind_input(&session, "position_ids", padded_position_ids[i].clone());
+        for (j, past) in empty_past.iter().enumerate() {
+            io_binding.bind_input(
+                &session,
+                &("past_".to_string() + &j.to_string()),
+                past.clone(),
+            );
+        }
+        if i == 0 {
+            break;
+        }
     }
-    .unwrap();
 
-    // Bind input
-    unsafe {
-        // Bind input name to an ort Value ptr
-        call_ort(|ort| {
-            ort.BindInput.unwrap()(
-                iobinding_ptr,
-                CString::new("name").unwrap().into_raw() as *const i8,
-                padded_input_ids,
-            )
-        })
+    for (name, buf) in output_buffer {
+        io_binding.bind_output(&session, &name, buf);
     }
-    .unwrap();
 }
 
 fn create_ort_output_buffer(
@@ -103,7 +107,7 @@ fn create_ort_output_buffer(
     hidden_layer_size: usize,
     num_hidden_layer: usize,
     vocab_size: usize,
-) {
+) -> HashMap<String, ArrayD<f32>> {
     // Get output_shapes first
     let mut output_shapes: HashMap<String, Vec<usize>> = HashMap::new();
     for output in &session.outputs {
@@ -139,6 +143,7 @@ fn create_ort_output_buffer(
     for b in output_buffer.values() {
         println!("buffers shape: {:?}", b.shape());
     }
+    output_buffer
 }
 
 fn get_tokenizer() -> Result<tokenizers::Tokenizer> {
