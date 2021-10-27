@@ -10,7 +10,7 @@ use crate::{
 };
 use ndarray::Array;
 use onnxruntime_sys as sys;
-use sys::OrtSession;
+use sys::{OrtSession, OrtValue};
 
 /// IoBinding is a wrapper for onnx io binding
 #[derive(Debug)]
@@ -31,7 +31,7 @@ impl IoBinding {
     }
 
     /// Bind input to iobinding
-    pub fn bind_input<T, D>(&self, session: &Session, name: &str, input: Array<T, D>)
+    pub fn bind_input<T, D>(&self, session: &Session, name: &str, input: &mut Array<T, D>)
     where
         T: TypeToTensorElementDataType + Debug + Clone,
         D: ndarray::Dimension,
@@ -54,7 +54,12 @@ impl IoBinding {
     }
 
     /// Bind output to iobinding
-    pub fn bind_output<T, D>(&self, session: &Session, name: &str, output: Array<T, D>)
+    pub fn bind_output<T, D>(
+        &self,
+        session: &Session,
+        name: &str,
+        output: &mut Array<T, D>,
+    ) -> *mut OrtValue
     where
         T: TypeToTensorElementDataType + Debug + Clone,
         D: ndarray::Dimension,
@@ -74,12 +79,13 @@ impl IoBinding {
             })
         }
         .unwrap();
+        return tensor_ptr;
     }
 
     fn create_ort_value<T, D>(
         &self,
         session: &Session,
-        mut input: Array<T, D>,
+        input: &mut Array<T, D>,
     ) -> *mut sys::OrtValue
     where
         T: TypeToTensorElementDataType + Debug + Clone,
@@ -128,12 +134,13 @@ mod tests {
             .with_optimization_level(GraphOptimizationLevel::All)
             .unwrap()
             .with_model_from_file(
-                "/Users/haobogu/Projects/rust/onnxruntime-rs/onnxruntime/examples/gpt2.onnx",
+                // "/Users/haobogu/Projects/rust/onnxruntime-rs/onnxruntime/examples/gpt2.onnx",
+                "D:\\Projects\\onnxruntime-rs\\onnxruntime\\examples\\gpt2.onnx",
             )
             .unwrap();
-        let array = arr0::<i32>(123);
+        let mut array = arr0::<i32>(123);
         let iobinding = IoBinding::new(session.session_ptr).unwrap();
-        iobinding.bind_input(&session, "input_ids", array.clone());
-        iobinding.bind_output(&session, "output_ids", array);
+        iobinding.bind_input(&session, "input_ids", &mut array);
+        iobinding.bind_output(&session, "output_ids", &mut array);
     }
 }

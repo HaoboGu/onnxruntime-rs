@@ -1,4 +1,4 @@
-use std::{cmp::max, collections::HashMap, ffi::CString};
+use std::{borrow::BorrowMut, cmp::max, collections::HashMap, ffi::CString};
 
 use ndarray::{Array, Array1, Array2, ArrayD, Ix, IxDyn};
 use onnxruntime::{
@@ -23,14 +23,19 @@ fn main() {
         // completes the builder.
         .finish();
     tracing::subscriber::set_global_default(subscriber).expect("setting default subscriber failed");
-    let env = Environment::builder().with_name("env").build().unwrap();
+    let env = Environment::builder()
+        .with_name("env")
+        .with_log_level(onnxruntime::LoggingLevel::Info)
+        .build()
+        .unwrap();
     let mut session = env
         .new_session_builder()
         .unwrap()
         .with_optimization_level(GraphOptimizationLevel::All)
         .unwrap()
         .with_model_from_file(
-            "/Users/haobogu/Projects/rust/onnxruntime-rs/onnxruntime/examples/gpt2.onnx",
+            // "/Users/haobogu/Projects/rust/onnxruntime-rs/onnxruntime/examples/gpt2.onnx",
+            "D:\\Projects\\onnxruntime-rs\\onnxruntime\\examples\\gpt2.onnx",
         )
         .unwrap();
 
@@ -64,37 +69,57 @@ fn main() {
     // Output { name: "present_9", output_type: Float, dimensions: [Some(2), None, Some(12), None, Some(64)] }
     // Output { name: "present_10", output_type: Float, dimensions: [Some(2), None, Some(12), None, Some(64)] }
     // Output { name: "present_11", output_type: Float, dimensions: [Some(2), None, Some(12), None, Some(64)] }] }
-    println!("{:#?}", session.inputs);
-    info!("{:#?}", session.outputs);
-    let (padded_input_ids, padded_attention_mask, padded_position_ids, empty_past) =
+    // println!("{:#?}", session.inputs);
+    // info!("{:#?}", session.outputs);
+    let (mut padded_input_ids, mut padded_attention_mask, mut padded_position_ids, mut empty_past) =
         get_example_input(vec![
             "best hotel in bay area".to_string(),
             "here is an example of gpt2 model".to_string(),
         ]);
-    let output_buffer = create_ort_output_buffer(&session, 2, 0, 9, 12, 768, 12, 50257);
+    let mut output_buffer = create_ort_output_buffer(&session, 2, 0, 9, 12, 768, 12, 50257);
 
     // Create io bindings
     let io_binding = iobinding::IoBinding::new(session.session_ptr).unwrap();
 
     // Bind values
-    io_binding.bind_input(&session, "input_ids", padded_input_ids);
-    io_binding.bind_input(&session, "attention_mask", padded_attention_mask);
-    io_binding.bind_input(&session, "position_ids", padded_position_ids);
-    for (j, past) in empty_past.iter().enumerate() {
+
+    println!("input ids shape: {:?}", padded_input_ids.shape());
+    println!("attention mask shape: {:?}", padded_attention_mask.shape());
+    println!("position ids shape: {:?}", padded_position_ids.shape());
+    io_binding.bind_input(&session, "input_ids", &mut padded_input_ids);
+    io_binding.bind_input(&session, "attention_mask", &mut padded_attention_mask);
+    io_binding.bind_input(&session, "position_ids", &mut padded_position_ids);
+    for (j, past) in empty_past.iter_mut().enumerate() {
+        println!("past {} shape: {:?}", j, past.shape());
+
+        // Here we use the pointer of padded_input_ids
+        // See: https://github.com/microsoft/onnxruntime/blob/3ec3e9f70534ca13823add8bfc75722f07d67253/onnxruntime/python/tools/transformers/gpt2_helper.py#L508
         io_binding.bind_input(
             &session,
             &("past_".to_string() + &j.to_string()),
-            past.clone(),
+            &mut padded_input_ids,
         );
     }
-
-    for (name, buf) in output_buffer {
+    for (name, buf) in &mut output_buffer {
+        println!("output {}'s shape: {:?}", name, buf.shape());
         io_binding.bind_output(&session, &name, buf);
     }
 
-    session.run_with_iobinding(io_binding).unwrap();
+    println!("complete binding");
+    session.run_with_iobinding(io_binding);
     // TODO: get output from iobinding buffer
     // get_outputs_from_io_binding_buffer();
+    println!("present0:\n{:?}", output_buffer["present_0"]);
+    println!("logits:\n{:?}", output_buffer["present_0"]);
+    // let result = get_outputs_from_io_binding_buffer(&session, output_buffer, vec![]);
+}
+
+fn get_outputs_from_io_binding_buffer(
+    session: &Session,
+    output_buffer: HashMap<String, ArrayD<f32>>,
+    output_shapes: Vec<usize>,
+) -> HashMap<String, ArrayD<f32>> {
+    return output_buffer.clone();
 }
 
 fn create_ort_output_buffer(
@@ -131,16 +156,11 @@ fn create_ort_output_buffer(
         }
     }
 
-    println!("shapes: {:?}", output_shapes);
-
     // Get output buffers, use ndarray as the buffer backed
     let mut output_buffer: HashMap<String, ArrayD<f32>> = HashMap::new();
     for (name, shape) in output_shapes {
         let data = ArrayD::<f32>::zeros(shape);
         output_buffer.insert(name, data);
-    }
-    for b in output_buffer.values() {
-        println!("buffers shape: {:?}", b.shape());
     }
     output_buffer
 }

@@ -378,17 +378,33 @@ impl<'a> Session<'a> {
     }
 
     /// Run the inference with iobinding
-    pub fn run_with_iobinding<'s>(&'s mut self, iobinding: IoBinding) -> Result<()>{
+    pub fn run_with_iobinding<'s>(&'s mut self, iobinding: IoBinding) -> Result<()> {
         let run_options_ptr: *const sys::OrtRunOptions = std::ptr::null();
         let status = unsafe {
             g_ort().RunWithBinding.unwrap()(
                 self.session_ptr,
                 run_options_ptr,
-                iobinding.iobinding_ptr,
+                iobinding.iobinding_ptr as *const onnxruntime_sys::OrtIoBinding,
             )
         };
         status_to_result(status).map_err(OrtError::Run)?;
-        Ok(())    
+
+        let mut result_ptr = std::ptr::null_mut();
+        let mut result_ptr_ptr: *mut *mut sys::OrtValue = &mut result_ptr;
+        let mut result_ptr_ptr_ptr: *mut *mut *mut sys::OrtValue = &mut result_ptr_ptr;
+        let mut size_ptr = std::ptr::null_mut();
+
+        // Get values
+        unsafe {
+            g_ort().GetBoundOutputValues.unwrap()(
+                iobinding.iobinding_ptr,
+                self.allocator_ptr,
+                result_ptr_ptr_ptr,
+                size_ptr,
+            )
+        };
+
+        Ok(())
     }
 
     /// Run the input data through the ONNX graph, performing inference.
