@@ -1,6 +1,6 @@
 use std::{cmp::max, collections::HashMap, ffi::CString};
 
-use ndarray::{Array, Array1, Array2, ArrayD, IxDyn};
+use ndarray::{Array, Array1, Array2, ArrayD, Ix, IxDyn};
 use onnxruntime::{
     environment::Environment,
     error::{assert_not_null_pointer, call_ort, status_to_result},
@@ -77,21 +77,15 @@ fn main() {
     let io_binding = iobinding::IoBinding::new(session.session_ptr).unwrap();
 
     // Bind values
-    for (i, _input) in padded_input_ids.iter().enumerate() {
-        println!("input ids: {:?}", padded_input_ids[i].clone());
-        io_binding.bind_input(&session, "input_ids", padded_input_ids[i].clone());
-        io_binding.bind_input(&session, "attention_mask", padded_attention_mask[i].clone());
-        io_binding.bind_input(&session, "position_ids", padded_position_ids[i].clone());
-        for (j, past) in empty_past.iter().enumerate() {
-            io_binding.bind_input(
-                &session,
-                &("past_".to_string() + &j.to_string()),
-                past.clone(),
-            );
-        }
-        if i == 0 {
-            break;
-        }
+    io_binding.bind_input(&session, "input_ids", padded_input_ids);
+    io_binding.bind_input(&session, "attention_mask", padded_attention_mask);
+    io_binding.bind_input(&session, "position_ids", padded_position_ids);
+    for (j, past) in empty_past.iter().enumerate() {
+        io_binding.bind_input(
+            &session,
+            &("past_".to_string() + &j.to_string()),
+            past.clone(),
+        );
     }
 
     for (name, buf) in output_buffer {
@@ -157,12 +151,7 @@ fn get_tokenizer() -> Result<tokenizers::Tokenizer> {
 
 fn get_example_input(
     texts: Vec<String>,
-) -> (
-    Vec<Array1<i64>>,
-    Vec<Array1<f32>>,
-    Vec<Array1<i64>>,
-    Vec<ArrayD<f32>>,
-) {
+) -> (ArrayD<i64>, ArrayD<f32>, ArrayD<i64>, Vec<ArrayD<f32>>) {
     let tokenizer = get_tokenizer().unwrap();
     let encodings_dict = tokenizer.encode_batch(texts, false).unwrap();
 
@@ -187,9 +176,9 @@ fn get_example_input(
                 // https://github.com/microsoft/onnxruntime/blob/master/onnxruntime/python/tools/transformers/notebooks/Inference_GPT2_with_OnnxRuntime_on_CPU.ipynb
                 input_id.insert(0, 50256);
             }
-            Array1::from_vec(input_id.into_iter().map(|v| v as i64).collect::<Vec<i64>>())
+            input_id.into_iter().map(|v| v as i64).collect::<Vec<i64>>()
         })
-        .collect::<Vec<Array1<i64>>>();
+        .collect::<Vec<Vec<i64>>>();
 
     let padded_attention_mask = attention_mask
         .into_iter()
@@ -200,9 +189,9 @@ fn get_example_input(
                 // https://github.com/microsoft/onnxruntime/blob/master/onnxruntime/python/tools/transformers/notebooks/Inference_GPT2_with_OnnxRuntime_on_CPU.ipynb
                 mask.insert(0, 0);
             }
-            Array1::from_vec(mask.into_iter().map(|v| v as f32).collect::<Vec<f32>>())
+            mask.into_iter().map(|v| v as f32).collect::<Vec<f32>>()
         })
-        .collect::<Vec<Array1<f32>>>();
+        .collect::<Vec<Vec<f32>>>();
 
     let mut sum: i64 = 0;
     // padding and max(cumsum - 1, 0)
@@ -221,9 +210,9 @@ fn get_example_input(
                 *item = if sum > 0 { sum - 1 } else { 0 };
             }
             sum = 0;
-            Array1::from_vec(position_id)
+            position_id
         })
-        .collect::<Vec<Array1<i64>>>();
+        .collect::<Vec<Vec<i64>>>();
 
     // num_attention_heads = model.config.n_head
     // hidden_size = model.config.n_embd
@@ -246,20 +235,41 @@ fn get_example_input(
         "{:?},\n {:?},\n {:?},\n {:?},",
         padded_input_ids, padded_attention_mask, padded_position_ids, empty_past
     );
-    let asdfasfd = ArrayD::<i64>::from_shape_vec(
-        IxDyn(&[padded_input_ids.len(), padded_input_ids[0].len()]),
-        padded_input_ids,
+
+    // Flat all
+    let padded_input_ids_array = ArrayD::<i64>::from_shape_vec(
+        IxDyn(&[2, max_length]),
+        padded_input_ids
+            .into_iter()
+            .flatten()
+            .into_iter()
+            .collect::<Vec<i64>>(),
+    )
+    .unwrap();
+
+    let padded_attention_mask_array = ArrayD::<f32>::from_shape_vec(
+        IxDyn(&[2, max_length]),
+        padded_attention_mask
+            .into_iter()
+            .flatten()
+            .into_iter()
+            .collect::<Vec<f32>>(),
+    )
+    .unwrap();
+
+    let padded_position_ids_array = ArrayD::<i64>::from_shape_vec(
+        IxDyn(&[2, max_length]),
+        padded_position_ids
+            .into_iter()
+            .flatten()
+            .into_iter()
+            .collect::<Vec<i64>>(),
     )
     .unwrap();
     (
-        padded_input_ids,
-        padded_attention_mask,
-        padded_position_ids,
-        empty_past,
-    )(
-        padded_input_ids,
-        padded_attention_mask,
-        padded_position_ids,
+        padded_input_ids_array,
+        padded_attention_mask_array,
+        padded_position_ids_array,
         empty_past,
     )
 }
